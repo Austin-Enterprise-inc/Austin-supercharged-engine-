@@ -1,68 +1,121 @@
-# Austin Supercharge Mesh (Single File)
-# AUSTIN SUPERCHARGE ENGINE
+# AUSTIN SUPERCHARGE ENGINE — RUNTIME IMPLEMENTATION
 ### Adaptive Event‑Processing Engine by Chad Alan Austin
 
 ## Overview
-The Austin Supercharge Engine is an original, self‑adaptive event‑processing system designed and authored by Chad Alan Austin. It evaluates the informational density of incoming events and optimizes throughput by filtering low‑value input in real time. The engine continuously adjusts its behavior based on system performance, ensuring stability, efficiency, and intelligent workload management.
+The Austin Supercharge Engine is an original, self‑adaptive event‑processing system authored by **Chad Alan Austin**. It evaluates the informational density of incoming events and optimizes throughput by filtering low‑value input in real time. The engine dynamically adjusts its filtering threshold based on system performance, ensuring stability, efficiency, and intelligent workload management.
 
-## Core Features
-- Adaptive filtering based on real‑time system performance
-- Informational density scoring for every incoming event
-- Real‑time decisioning: process or drop events dynamically
-- Self‑learning feedback loop using historical performance data
-- Lightweight integration into any event‑driven pipeline
+This repository contains the clean, single‑file runnable implementation of the engine.
 
-## Event Flow
-1. Event received
-2. Informational density analysis
-3. Score assignment
-4. Threshold comparison
-5. Process or drop
-6. State logging
+---
 
-## Adaptive Logic
-The engine monitors runtime conditions and adjusts its filtering threshold:
-- If latency increases → threshold rises → stricter filtering
-- If performance stabilizes → threshold lowers → more permissive intake
+## Features
+- Real‑time event ingestion via HTTP
+- Informational density scoring for each event
+- Adaptive threshold that tightens or relaxes based on drop rate
+- Continuous processing loop and control loop
+- Lightweight Express server with `/event` and `/health` endpoints
+- Fully self‑contained runtime with no external dependencies beyond Express
 
-This creates a closed‑loop feedback system that self‑regulates under varying load conditions.
+---
 
-## State Model
-The engine maintains:
-- total processed events
-- total dropped events
-- rolling execution‑speed history
-- adaptive confidence threshold
+## How It Works
 
-This state enables reproducibility, introspection, and long‑term optimization.
+### 1. Event Ingestion
+Events are POSTed to `/event` and added to the internal queue.
 
-## Design Intent
-The Austin Supercharge Engine is built to:
-- maximize throughput
-- reduce noise
-- stabilize system performance
-- optimize resource usage
-- operate autonomously with minimal configuration
+### 2. Scoring
+Each event receives an informational density score based on simple heuristics:
+- Presence of `target_kw` increases score  
+- Presence of `spam` decreases score  
 
-## Final Definition
-A continuously adjusting event‑processing engine that optimizes throughput and system stability by filtering input based on dynamic signal‑quality evaluation.
+Scores are normalized between **0.0 and 1.0**.
 
-## Author & Ownership
-Created by:
-**Chad Alan Austin**
-Founder, Austin Enterprise
-Principal Investigator & Chief Architect, C.H.A.D. Architectural Framework
+### 3. Processing
+Events with scores **below the adaptive threshold** are dropped.  
+Events above the threshold are processed.
 
-Ownership:
-All concepts, systems, architectures, names, and outputs in this repository are original works authored by Chad Alan Austin. All rights belong exclusively to the author.
+### 4. Adaptive Control Loop
+Every 2 seconds:
+- If drop rate > 30% → threshold increases (stricter)
+- If drop rate ≤ 30% → threshold decreases (more permissive)
 
-## Next Steps
-- Integrate into event‑driven systems
-- Add runtime instrumentation
-- Extend scoring logic for domain‑specific signals
-- Build visualization dashboards for performance metrics
-## Run
+Threshold is clamped between **0.05 and 0.9**.
 
-```bash
-npm install express
-node index.js
+### 5. Health Endpoint
+`/health` returns the full system state:
+- queue length  
+- processed count  
+- dropped count  
+- current threshold  
+
+---
+
+## Single‑File System Code
+
+```js
+const express = require("express");
+const app = express();
+
+app.use(express.json());
+
+const state = {
+  queue: [],
+  processed: 0,
+  dropped: 0,
+  threshold: 0.2
+};
+
+// INGESTION
+app.post("/event", (req, res) => {
+  state.queue.push(req.body);
+  res.json({ status: "queued" });
+});
+
+// SCORE FUNCTION
+function score(event) {
+  let s = 0.5;
+
+  if (event?.target_kw) s += 0.2;
+  if (event?.spam) s -= 0.4;
+
+  return Math.max(0, Math.min(1, s));
+}
+
+// PROCESSOR
+function process() {
+  const event = state.queue.shift();
+  if (!event) return;
+
+  const s = score(event);
+  state.processed++;
+
+  if (s < state.threshold) {
+    state.dropped++;
+    return;
+  }
+}
+
+// CONTROL LOOP
+function control() {
+  const total = state.processed + state.dropped;
+  if (!total) return;
+
+  const dropRate = state.dropped / total;
+
+  if (dropRate > 0.3) state.threshold += 0.05;
+  else state.threshold -= 0.01;
+
+  state.threshold = Math.max(0.05, Math.min(0.9, state.threshold));
+}
+
+// LOOPS
+setInterval(process, 20);
+setInterval(control, 2000);
+
+app.get("/health", (req, res) => {
+  res.json(state);
+});
+
+app.listen(3000, () => {
+  console.log("Supercharge Mesh running");
+});
